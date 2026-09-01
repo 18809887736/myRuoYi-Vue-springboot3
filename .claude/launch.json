@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ruoyi-ui-dev",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", ".claude\\dev-server.cmd"],
+      "port": 8081
+    }
+  ]
+}
