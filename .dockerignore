@@ -1,0 +1,13 @@
+# 构建上下文裁剪: backend/frontend 的 build context 都是仓库根目录
+.git
+.github
+.gitignore
+doc
+sql
+bin
+*.md
+docker/mysql
+docker/.env
+docker/.env.example
+ruoyi-ui/node_modules
+ruoyi-ui/dist

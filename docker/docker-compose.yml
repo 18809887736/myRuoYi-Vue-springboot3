@@ -1,0 +1,118 @@
+name: ruoyi
+
+services:
+  mysql:
+    image: mysql:${MYSQL_TAG:-8.0}
+    container_name: ruoyi-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - ruoyi-mysql-data:/var/lib/mysql
+      - ./mysql/conf.d:/etc/mysql/conf.d:ro
+      - ./mysql/initdb:/docker-entrypoint-initdb.d:ro
+    networks: [ruoyi-net]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:${REDIS_TAG:-7-alpine}
+    container_name: ruoyi-redis
+    restart: unless-stopped
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--requirepass", "${REDIS_PASSWORD}"]
+    environment:
+      TZ: Asia/Shanghai
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - ruoyi-redis-data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks: [ruoyi-net]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend/Dockerfile
+    image: ruoyi-backend:local
+    container_name: ruoyi-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      LANG: C.UTF-8
+      SERVER_PORT: ${BACKEND_PORT:-18080}
+      JVM_OPTS: ${JVM_OPTS:--Xms256m -Xmx1024m}
+      # 映射到 ruoyi.profile(上传文件路径)
+      RUOYI_PROFILE: ${UPLOAD_PATH:-/home/ruoyi/uploadPath}
+      # 映射到 token.secret
+      TOKEN_SECRET: ${TOKEN_SECRET}
+      # Spring Boot 3: redis 在 spring.data.redis 下; druid 主库在 spring.datasource.druid.master 下
+      SPRING_DATASOURCE_DRUID_MASTER_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_DRUID_MASTER_USERNAME: ${MYSQL_USER}
+      SPRING_DATASOURCE_DRUID_MASTER_PASSWORD: ${MYSQL_PASSWORD}
+      # 关闭 druid 监控台(降低攻击面, 见部署方案 §12)
+      SPRING_DATASOURCE_DRUID_STATVIEWSERVLET_ENABLED: "false"
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      # logback.xml 中 log.path=/home/ruoyi/logs
+      - /opt/apps/iflytek/ruoyi-backend-logs:/home/ruoyi/logs
+      - /opt/apps/iflytek/ruoyi-upload:/home/ruoyi/uploadPath
+    ports:
+      - "${HOST_PORT_BACKEND:-18081}:${BACKEND_PORT:-18080}"
+    networks: [ruoyi-net]
+    healthcheck:
+      # 镜像内无 actuator, 用 TCP 端口探活(bash /dev/tcp)
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/$${SERVER_PORT:-18080}' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend/Dockerfile
+    image: ruoyi-frontend:local
+    container_name: ruoyi-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${HOST_PORT_FRONTEND:-18080}:80"
+    volumes:
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [ruoyi-net]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+networks:
+  ruoyi-net:
+    driver: bridge
+
+volumes:
+  ruoyi-mysql-data:
+  ruoyi-redis-data:

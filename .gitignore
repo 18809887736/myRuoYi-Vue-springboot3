@@ -45,3 +45,7 @@ nbdist/
 !*/build/*.java
 !*/build/*.html
 !*/build/*.xml
+
+######################################################################
+# Docker secrets
+docker/.env
